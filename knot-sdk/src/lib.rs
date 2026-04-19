@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize, Serialize };
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, Mutex};
+use tokio::io::{ AsyncBufReadExt, AsyncWriteExt, BufReader };
+use tokio::net::{ TcpListener, TcpStream };
+use tokio::sync::{ broadcast, Mutex };
 
 const MAX_PAYLOAD_SIZE: usize = 15 * 1024 * 1024;
 
@@ -13,14 +13,25 @@ const MAX_PAYLOAD_SIZE: usize = 15 * 1024 * 1024;
 #[derive(Debug, Serialize)]
 #[serde(tag = "command", rename_all = "lowercase")]
 pub enum KnotCommand {
+    Protocol,
     Status,
-    Getpeers,
-    #[serde(rename = "newappname")]
-    NewAppName { name: String, port: u16 },
-    Connect { multiaddr: String },
-    #[serde(rename = "connectrelay")]
-    ConnectRelay { multiaddr: String, peerid: String },
-    Discover { peer_id: String },
+    #[serde(rename = "getpeers")] GetPeers,
+    #[serde(rename = "getpeerid")] GetPeerId,
+    #[serde(rename = "getcommands")] GetCommands,
+    #[serde(rename = "newappname")] NewAppName {
+        name: String,
+        port: u16,
+    },
+    Connect {
+        multiaddr: String,
+    },
+    #[serde(rename = "connectrelay")] ConnectRelay {
+        multiaddr: String,
+        peerid: String,
+    },
+    Discover {
+        peer_id: String,
+    },
 }
 
 // ─────────────────────────────────────────────
@@ -40,20 +51,16 @@ pub struct KnotMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum KnotError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("IO error: {0}")] Io(#[from] std::io::Error),
+    #[error("JSON error: {0}")] Json(#[from] serde_json::Error),
     #[error("Socket not connected")]
     NotConnected,
     #[error("AppId not found")]
     AppIdNotFound,
-    #[error("Payload exceeds 15 MB limit ({0} bytes)")]
-    PayloadTooLarge(usize),
+    #[error("Payload exceeds 15 MB limit ({0} bytes)")] PayloadTooLarge(usize),
     #[error("Peer parse error")]
     PeerParseError,
-    #[error("{0}")]
-    Custom(String),
+    #[error("{0}")] Custom(String),
 }
 
 // ─────────────────────────────────────────────
@@ -137,7 +144,9 @@ impl KnotClient {
                                 let _ = msg_tx_clone.send(msg);
                             }
                             Err(e) => {
-                                eprintln!("[Knot] Failed to parse JSON message: {e} — raw: {trimmed}");
+                                eprintln!(
+                                    "[Knot] Failed to parse JSON message: {e} — raw: {trimmed}"
+                                );
                             }
                         }
                     }
@@ -204,12 +213,7 @@ impl KnotClient {
             return Err(KnotError::PayloadTooLarge(payload.len()));
         }
 
-        let app_id = self
-            .inner
-            .app_id
-            .lock()
-            .await
-            .ok_or(KnotError::AppIdNotFound)?;
+        let app_id = self.inner.app_id.lock().await.ok_or(KnotError::AppIdNotFound)?;
 
         let peer_id = get_peer_id_u64(peer_input)?;
 
@@ -282,7 +286,8 @@ async fn handle_byte_connection(mut socket: TcpStream, tx: broadcast::Sender<Str
 /// Decode a base58-encoded peer ID string and return its last 8 bytes as u64 BE.
 /// Mirrors the TypeScript `getPeerIdBigInt` function.
 pub fn get_peer_id_u64(peer_input: &str) -> Result<u64, KnotError> {
-    let decoded = bs58::decode(peer_input)
+    let decoded = bs58
+        ::decode(peer_input)
         .into_vec()
         .map_err(|_| KnotError::PeerParseError)?;
 
