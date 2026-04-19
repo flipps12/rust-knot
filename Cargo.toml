@@ -1,0 +1,2 @@
+[workspace]
+members = ["knot-sdk", "knot-test"]
