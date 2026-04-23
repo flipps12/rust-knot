@@ -201,7 +201,7 @@ impl KnotClient {
 
     pub async fn send_json(&self, command: KnotCommand) -> Result<(), KnotError> {
         let json = serde_json::to_string(&command)?;
-        println!("{json}");
+        //println!("{json}");
 
         let mut guard = self.inner.json_writer.lock().await;
         let writer = guard.as_mut().ok_or(KnotError::NotConnected)?;
