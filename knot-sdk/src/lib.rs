@@ -169,7 +169,7 @@ impl KnotClient {
             let ip = format!("127.0.0.1:{}", local_port);
             match TcpListener::bind(ip).await {
                 Ok(listener) => {
-                    println!("[RS-Knot] Servidor de bytes escuchando en puerto 8124");
+                    println!("[RS-Knot] Servidor de bytes escuchando en puerto {}", local_port);
                     loop {
                         match listener.accept().await {
                             Ok((socket, addr)) => {
