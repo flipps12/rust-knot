@@ -192,7 +192,7 @@ impl KnotClient {
         });
 
         // Initial status handshake (mirrors TS constructor)
-        client.send_json(KnotCommand::Status).await?;
+        //client.send_json(KnotCommand::Status).await?;
 
         Ok(client)
     }
