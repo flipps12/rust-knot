@@ -13,6 +13,7 @@ const MAX_PAYLOAD_SIZE: usize = 15 * 1024 * 1024;
 #[derive(Debug, Serialize)]
 #[serde(tag = "command", rename_all = "lowercase")]
 pub enum KnotCommand {
+    Version,
     Protocol,
     Status,
     #[serde(rename = "getpeers")] GetPeers,
