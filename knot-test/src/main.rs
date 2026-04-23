@@ -17,7 +17,7 @@ async fn main() {
     println!("{}", "=======".to_owned() + " Main test " + "=======");
 
     // ── Connect ──────────────────────────────────────────────────────────
-    let knot = match KnotClient::new().await {
+    let knot = match KnotClient::new(6789).await {
         Ok(k) => k,
         Err(e) => {
             eprintln!("Failed to connect KnotClient: {e}");

@@ -89,7 +89,7 @@ pub struct KnotClient {
 impl KnotClient {
     /// Create and connect the client.
     /// Spawns background tasks for JSON socket, byte socket, and byte-server listener.
-    pub async fn new() -> Result<Self, KnotError> {
+    pub async fn new(local_port: i32) -> Result<Self, KnotError> {
         let (msg_tx, _) = broadcast::channel::<KnotMessage>(64);
         let (byte_tx, _) = broadcast::channel::<String>(64);
 
@@ -166,9 +166,10 @@ impl KnotClient {
         // ── Byte server (port 8124) — receives messages from peers ──
         let byte_tx_clone = byte_tx.clone();
         tokio::spawn(async move {
-            match TcpListener::bind("0.0.0.0:8124").await {
+            let ip = format!("127.0.0.1:{}", local_port);
+            match TcpListener::bind(ip).await {
                 Ok(listener) => {
-                    println!("[JS-Knot] Servidor de bytes escuchando en puerto 8124");
+                    println!("[RS-Knot] Servidor de bytes escuchando en puerto 8124");
                     loop {
                         match listener.accept().await {
                             Ok((socket, addr)) => {
