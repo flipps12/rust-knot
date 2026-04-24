@@ -200,14 +200,14 @@ impl KnotClient {
 
     // ── Public API ──────────────────────────────
 
-    pub async fn send_json(&self, command: KnotCommand) -> Result<(), KnotError> {
+    pub async fn send_json(&self, command: KnotCommand) -> Result<String, KnotError> {
         let json = serde_json::to_string(&command)?;
         //println!("{json}");
 
         let mut guard = self.inner.json_writer.lock().await;
         let writer = guard.as_mut().ok_or(KnotError::NotConnected)?;
-        writer.write_all((json + "\n").as_bytes()).await?;
-        Ok(())
+        writer.write_all((json.clone() + "\n").as_bytes()).await?;
+        Ok(json)
     }
 
     pub async fn send_bytes(&self, peer_input: &str, payload: &[u8]) -> Result<(), KnotError> {
