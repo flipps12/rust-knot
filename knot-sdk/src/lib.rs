@@ -23,7 +23,7 @@ pub enum KnotCommand {
         name: String,
         port: u16,
     },
-    Connect {
+    #[serde(rename = "connect")] Connect {
         multiaddr: String,
     },
     #[serde(rename = "connectrelay")] ConnectRelay {
