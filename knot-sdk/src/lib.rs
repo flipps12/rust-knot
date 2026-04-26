@@ -23,10 +23,10 @@ pub enum KnotCommand {
     #[serde(rename = "getpeers")] GetPeers,
     #[serde(rename = "getpeerid")] GetPeerId,
     #[serde(rename = "getcommands")] GetCommands,
-    #[serde(rename = "newappname")] NewAppName {
-        name: String,
-        port: u16,
-    },
+    // #[serde(rename = "newappname")] NewAppName {
+    //     name: String,
+    //     port: u16,
+    // },
     #[serde(rename = "connect")] Connect {
         multiaddr: String,
     },
@@ -214,12 +214,12 @@ impl KnotClient {
         Ok(json)
     }
 
-    pub async fn send_bytes(&self, peer_input: &str, payload: &[u8]) -> Result<(), KnotError> {
+    pub async fn send_bytes(&self, peer_input: &str, payload: &[u8], app_id: u64) -> Result<(), KnotError> {
         if payload.len() > MAX_PAYLOAD_SIZE {
             return Err(KnotError::PayloadTooLarge(payload.len()));
         }
 
-        let app_id = self.inner.app_id.lock().await.ok_or(KnotError::AppIdNotFound)?;
+        //let app_id = self.inner.app_id.lock().await.ok_or(KnotError::AppIdNotFound)?;
 
         let peer_id = get_peer_id_u64(peer_input)?;
 
