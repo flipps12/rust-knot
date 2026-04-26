@@ -16,6 +16,10 @@ pub enum KnotCommand {
     Version,
     Protocol,
     Status,
+    #[serde(rename = "register")] Register {
+        app_id: u64,
+        port: u16,
+    },
     #[serde(rename = "getpeers")] GetPeers,
     #[serde(rename = "getpeerid")] GetPeerId,
     #[serde(rename = "getcommands")] GetCommands,
