@@ -26,10 +26,7 @@ async fn main() {
     };
 
     // ── Register app ─────────────────────────────────────────────────────
-    knot.send_json(KnotCommand::NewAppName {
-        name: "rstext".into(),
-        port: 8125,
-    }).await.expect("send_json failed");
+    knot.send_json(KnotCommand::Register { app_id: 5050505, port: 8125 }).await.expect("send_json failed");
 
     knot.send_json(KnotCommand::Protocol).await.expect("send_json failed");
     knot.send_json(KnotCommand::GetCommands).await.expect("send_json failed");
@@ -114,7 +111,7 @@ async fn main() {
 
                         if
                             let Err(e) = rt.block_on(async move {
-                                knot_inner.send_bytes(&peer_clone, &payload).await
+                                knot_inner.send_bytes(&peer_clone, &payload, 5050505).await
                             })
                         {
                             eprintln!("Fallo en el SDK: {e}");

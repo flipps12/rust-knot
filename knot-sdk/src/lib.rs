@@ -1,13 +1,36 @@
 use serde::{ Deserialize, Serialize };
+#[cfg(unix)]
+use tokio::net::UnixStream;
 use std::sync::Arc;
-use tokio::io::{ AsyncBufReadExt, AsyncWriteExt, BufReader };
-use tokio::net::{ TcpListener, TcpStream };
+use tokio::io::{ AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader };
+use tokio::net::TcpStream;
 use tokio::sync::{ broadcast, Mutex };
 
 const MAX_PAYLOAD_SIZE: usize = 15 * 1024 * 1024;
 
+pub enum KnotStream {
+    Tcp(TcpStream),
+    #[cfg(unix)] Unix(UnixStream),
+}
+
+impl KnotStream {
+    pub fn split(self) -> (Box<dyn AsyncRead + Send + Unpin>, Box<dyn AsyncWrite + Send + Unpin>) {
+        match self {
+            KnotStream::Tcp(s) => {
+                let (r, w) = tokio::io::split(s);
+                (Box::new(r), Box::new(w))
+            }
+            #[cfg(unix)]
+            KnotStream::Unix(s) => {
+                let (r, w) = tokio::io::split(s);
+                (Box::new(r), Box::new(w))
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────────
-// Commands (mirrors TS KnotCommand union)
+// Commands
 // ─────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -73,8 +96,8 @@ pub enum KnotError {
 // ─────────────────────────────────────────────
 
 struct Inner {
-    json_writer: Mutex<Option<tokio::net::tcp::OwnedWriteHalf>>,
-    byte_writer: Mutex<Option<tokio::net::tcp::OwnedWriteHalf>>,
+    json_writer: Mutex<Option<Box<dyn AsyncWrite + Send + Unpin>>>,
+    byte_writer: Mutex<Option<Box<dyn AsyncWrite + Send + Unpin>>>,
     app_id: Mutex<Option<u64>>,
 }
 
@@ -111,8 +134,8 @@ impl KnotClient {
         };
 
         // ── JSON socket (port 12012) ──
-        let json_stream = TcpStream::connect("127.0.0.1:12012").await?;
-        let (json_read, json_write) = json_stream.into_split();
+        let json_stream = connect_dynamic(12012, "managed").await?;
+        let (json_read, json_write) = json_stream.split();
         *inner.json_writer.lock().await = Some(json_write);
 
         // Background task: read newline-delimited JSON
@@ -164,36 +187,14 @@ impl KnotClient {
         });
 
         // ── Byte socket (port 12812) ──
-        let byte_stream = TcpStream::connect("127.0.0.1:12812").await?;
-        let (_byte_read, byte_write) = byte_stream.into_split();
+        let byte_stream = connect_dynamic(12812, "binary").await?;
+        let (_byte_read, byte_write) = byte_stream.split();
         *inner.byte_writer.lock().await = Some(byte_write);
 
         // ── Byte server (port 8124) — receives messages from peers ──
         let byte_tx_clone = byte_tx.clone();
         tokio::spawn(async move {
-            let ip = format!("127.0.0.1:{}", local_port);
-            match TcpListener::bind(ip).await {
-                Ok(listener) => {
-                    println!("[RS-Knot] Servidor de bytes escuchando en puerto {}", local_port);
-                    loop {
-                        match listener.accept().await {
-                            Ok((socket, addr)) => {
-                                println!("[Knot] Nueva conexión entrante desde {addr}");
-                                let tx = byte_tx_clone.clone();
-                                tokio::spawn(async move {
-                                    handle_byte_connection(socket, tx).await;
-                                });
-                            }
-                            Err(e) => {
-                                eprintln!("[Knot] Byte server accept error: {e}");
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[Knot] Failed to bind byte server on 8124: {e}");
-                }
-            }
+            start_dynamic_byte_server(local_port, byte_tx_clone).await;
         });
 
         // Initial status handshake (mirrors TS constructor)
@@ -214,7 +215,12 @@ impl KnotClient {
         Ok(json)
     }
 
-    pub async fn send_bytes(&self, peer_input: &str, payload: &[u8], app_id: u64) -> Result<(), KnotError> {
+    pub async fn send_bytes(
+        &self,
+        peer_input: &str,
+        payload: &[u8],
+        app_id: u64
+    ) -> Result<(), KnotError> {
         if payload.len() > MAX_PAYLOAD_SIZE {
             return Err(KnotError::PayloadTooLarge(payload.len()));
         }
@@ -260,37 +266,6 @@ impl KnotClient {
     }
 }
 
-// ─────────────────────────────────────────────
-// Byte connection handler
-// ─────────────────────────────────────────────
-
-async fn handle_byte_connection(mut socket: TcpStream, tx: broadcast::Sender<String>) {
-    use tokio::io::AsyncReadExt;
-    let mut buf = vec![0u8; 65536];
-    loop {
-        match socket.read(&mut buf).await {
-            Ok(0) => {
-                println!("[Knot] Byte client disconnected");
-                break;
-            }
-            Ok(n) => {
-                let msg = String::from_utf8_lossy(&buf[..n]).to_string();
-                let _ = tx.send(msg);
-            }
-            Err(e) => {
-                eprintln!("[Knot] Byte read error: {e}");
-                break;
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────
-// Peer ID helpers  (mirrors TS getPeerIdBigInt)
-// ─────────────────────────────────────────────
-
-/// Decode a base58-encoded peer ID string and return its last 8 bytes as u64 BE.
-/// Mirrors the TypeScript `getPeerIdBigInt` function.
 pub fn get_peer_id_u64(peer_input: &str) -> Result<u64, KnotError> {
     let decoded = bs58
         ::decode(peer_input)
@@ -306,4 +281,65 @@ pub fn get_peer_id_u64(peer_input: &str) -> Result<u64, KnotError> {
     }
 
     Ok(u64::from_be_bytes(arr))
+}
+
+async fn connect_dynamic(port: u16, name: &str) -> Result<KnotStream, KnotError> {
+    #[cfg(unix)]
+    {
+        let path = format!("/tmp/knot_{}_{}.sock", name, port);
+        if std::path::Path::new(&path).exists() {
+            if let Ok(s) = UnixStream::connect(&path).await {
+                return Ok(KnotStream::Unix(s));
+            }
+        }
+    }
+    // Fallback a TCP (o default en Windows)
+    let s = TcpStream::connect(format!("127.0.0.1:{}", port)).await?;
+    Ok(KnotStream::Tcp(s))
+}
+
+async fn start_dynamic_byte_server(port: i32, tx: broadcast::Sender<String>) {
+    #[cfg(unix)]
+    {
+        let path = format!("/tmp/knot_app_{}.sock", port);
+        let _ = std::fs::remove_file(&path);
+        if let Ok(listener) = tokio::net::UnixListener::bind(&path) {
+            loop {
+                if let Ok((s, _)) = listener.accept().await {
+                    let tx_c = tx.clone();
+                    tokio::spawn(async move {
+                        handle_any_stream(Box::new(s), tx_c).await;
+                    });
+                }
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        use tokio::net::TcpListener;
+        let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
+        loop {
+            if let Ok((s, _)) = listener.accept().await {
+                let tx_c = tx.clone();
+                tokio::spawn(async move {
+                    handle_any_stream(Box::new(s), tx_c).await;
+                });
+            }
+        }
+    }
+}
+
+// Handler genérico que acepta CUALQUIER cosa que lea
+async fn handle_any_stream(
+    mut reader: Box<dyn AsyncRead + Send + Unpin>,
+    tx: broadcast::Sender<String>
+) {
+    let mut buf = vec![0u8; 65536];
+    while let Ok(n) = reader.read(&mut buf).await {
+        if n == 0 {
+            break;
+        }
+        let _ = tx.send(String::from_utf8_lossy(&buf[..n]).to_string());
+    }
 }
