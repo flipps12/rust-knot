@@ -39,6 +39,7 @@ pub enum KnotCommand {
     Version,
     Protocol,
     Status,
+    Listeners,
     #[serde(rename = "register")] Register {
         app_id: u64,
         port: u16,
