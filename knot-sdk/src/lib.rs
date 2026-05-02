@@ -54,8 +54,8 @@ pub enum KnotCommand {
         multiaddr: String,
     },
     #[serde(rename = "connectrelay")] ConnectRelay {
-        multiaddr: String,
-        peerid: String,
+        relay_addr: String,
+        relay_id: String,
     },
     Discover {
         peer_id: String,
