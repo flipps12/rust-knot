@@ -1,20 +1,26 @@
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::UnixStream;
-use std::sync::Arc;
-use tokio::io::{ AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader };
-use tokio::net::TcpStream;
-use tokio::sync::{ broadcast, Mutex };
+use tokio::sync::{Mutex, broadcast};
 
 const MAX_PAYLOAD_SIZE: usize = 15 * 1024 * 1024;
 
 pub enum KnotStream {
     Tcp(TcpStream),
-    #[cfg(unix)] Unix(UnixStream),
+    #[cfg(unix)]
+    Unix(UnixStream),
 }
 
 impl KnotStream {
-    pub fn split(self) -> (Box<dyn AsyncRead + Send + Unpin>, Box<dyn AsyncWrite + Send + Unpin>) {
+    pub fn split(
+        self,
+    ) -> (
+        Box<dyn AsyncRead + Send + Unpin>,
+        Box<dyn AsyncWrite + Send + Unpin>,
+    ) {
         match self {
             KnotStream::Tcp(s) => {
                 let (r, w) = tokio::io::split(s);
@@ -40,21 +46,27 @@ pub enum KnotCommand {
     Protocol,
     Status,
     Listeners,
-    #[serde(rename = "register")] Register {
+    #[serde(rename = "register")]
+    Register {
         app_id: u64,
         port: u16,
     },
-    #[serde(rename = "getpeers")] GetPeers,
-    #[serde(rename = "getpeerid")] GetPeerId,
-    #[serde(rename = "getcommands")] GetCommands,
+    #[serde(rename = "getpeers")]
+    GetPeers,
+    #[serde(rename = "getpeerid")]
+    GetPeerId,
+    #[serde(rename = "getcommands")]
+    GetCommands,
     // #[serde(rename = "newappname")] NewAppName {
     //     name: String,
     //     port: u16,
     // },
-    #[serde(rename = "connect")] Connect {
+    #[serde(rename = "connect")]
+    Connect {
         multiaddr: String,
     },
-    #[serde(rename = "connectrelay")] ConnectRelay {
+    #[serde(rename = "connectrelay")]
+    ConnectRelay {
         relay_addr: String,
         relay_id: String,
     },
@@ -67,7 +79,7 @@ pub enum KnotCommand {
 // Inbound messages
 // ─────────────────────────────────────────────
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KnotMessage {
     pub command: Option<String>,
     pub response: Option<serde_json::Value>,
@@ -80,16 +92,20 @@ pub struct KnotMessage {
 
 #[derive(Debug, thiserror::Error)]
 pub enum KnotError {
-    #[error("IO error: {0}")] Io(#[from] std::io::Error),
-    #[error("JSON error: {0}")] Json(#[from] serde_json::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("Socket not connected")]
     NotConnected,
     #[error("AppId not found")]
     AppIdNotFound,
-    #[error("Payload exceeds 15 MB limit ({0} bytes)")] PayloadTooLarge(usize),
+    #[error("Payload exceeds 15 MB limit ({0} bytes)")]
+    PayloadTooLarge(usize),
     #[error("Peer parse error")]
     PeerParseError,
-    #[error("{0}")] Custom(String),
+    #[error("{0}")]
+    Custom(String),
 }
 
 // ─────────────────────────────────────────────
@@ -222,7 +238,7 @@ impl KnotClient {
         &self,
         peer_input: &str,
         payload: &[u8],
-        app_id: u64
+        app_id: u64,
     ) -> Result<(), KnotError> {
         if payload.len() > MAX_PAYLOAD_SIZE {
             return Err(KnotError::PayloadTooLarge(payload.len()));
@@ -270,8 +286,7 @@ impl KnotClient {
 }
 
 pub fn get_peer_id_u64(peer_input: &str) -> Result<u64, KnotError> {
-    let decoded = bs58
-        ::decode(peer_input)
+    let decoded = bs58::decode(peer_input)
         .into_vec()
         .map_err(|_| KnotError::PeerParseError)?;
 
@@ -321,7 +336,9 @@ async fn start_dynamic_byte_server(port: i32, tx: broadcast::Sender<String>) {
     #[cfg(not(unix))]
     {
         use tokio::net::TcpListener;
-        let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
+            .await
+            .unwrap();
         loop {
             if let Ok((s, _)) = listener.accept().await {
                 let tx_c = tx.clone();
@@ -336,7 +353,7 @@ async fn start_dynamic_byte_server(port: i32, tx: broadcast::Sender<String>) {
 // Handler genérico que acepta CUALQUIER cosa que lea
 async fn handle_any_stream(
     mut reader: Box<dyn AsyncRead + Send + Unpin>,
-    tx: broadcast::Sender<String>
+    tx: broadcast::Sender<String>,
 ) {
     let mut buf = vec![0u8; 65536];
     while let Ok(n) = reader.read(&mut buf).await {
